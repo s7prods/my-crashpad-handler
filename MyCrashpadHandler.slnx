@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="crashpad_handler/crashpad_handler.vcxproj" Id="428fbd76-0258-4577-913a-7581e1c0c3b4" />
+</Solution>

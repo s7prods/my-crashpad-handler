@@ -1,0 +1,23 @@
+﻿#pragma once
+#pragma once
+#pragma once
+
+// 包括 SDKDDKVer.h 将定义可用的最高版本的 Windows 平台。
+
+//如果要为以前的 Windows 平台生成应用程序，请包括 WinSDKVer.h，并
+// 将 _WIN32_WINNT 宏设置为要支持的平台，然后再包括 SDKDDKVer.h。
+
+#include <WinSDKVer.h>
+
+
+#define _WIN32_WINNT  _WIN32_WINNT_WIN7
+
+#include <SDKDDKVer.h>
+
+#include <Windows.h>
+#include <Uxtheme.h>
+#include <VersionHelpers.h>
+#include <string>
+#include <algorithm>
+#include <stdlib.h>
+#include <stdint.h>

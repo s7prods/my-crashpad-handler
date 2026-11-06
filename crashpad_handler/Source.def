@@ -1,0 +1,6 @@
+﻿LIBRARY
+
+EXPORTS
+	Version
+	crashpad_handler_Builtin
+	crashpad_handler_RunDLL
