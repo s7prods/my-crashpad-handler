@@ -1,7 +1,7 @@
 ﻿#include "./sdk.h"
 #include <comdef.h>
 #include <Wbemidl.h>
-#include <iostream>
+#include <vector>
 #include "errhlp.hpp"
 #pragma comment(lib, "wbemuuid.lib")
 
@@ -30,7 +30,7 @@ inline uint64_t MakeVersion(uint8_t major, uint8_t minor, uint8_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 1, 1);
+	return MakeVersion(1, 1, 2);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -165,11 +165,11 @@ BOOL WINAPI crashpad_handler_Builtin_Free(LPVOID lpContext) {
 	}
 
 	// main logic is here
-	bool bOk = true;
-	bOk = bOk && TerminateProcess(hProcess, 0);
-	bOk = bOk && CloseHandle(hProcess);
-	bOk = bOk && VirtualFree(lpContext, 0, MEM_RELEASE);
-	return bOk;
+	bool ok = true;
+	ok = TerminateProcess(hProcess, 0) && ok;
+	ok = CloseHandle(hProcess) && ok;
+	ok = VirtualFree(lpContext, 0, MEM_RELEASE) && ok;
+	return ok;
 }
 
 

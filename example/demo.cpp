@@ -42,8 +42,8 @@ int main() {
 	HMODULE hModule{};
 	LPVOID lpContext{};
 	const wchar_t* pinned[] = {
-		L"9ea9efc8853714e99f862475dc778ef8c40afe98ddd140a45d98b11403d6dd36",
-		L"6c4afe70bdb71ef7308ebb638a32ddc335e63334208858fa954c8e978fd6a381",
+		L"d78c9e29e01fa7c3adb999042cd995067189349a58754c1e19f1811e5d16566d",
+		L"e65c3824c6987991de8234c56d97b008bab10f77ae1f9142ddfa679c5d8dab64",
 	};
 	auto res = InitializeCrashpadHandler(NULL, s2ws(lpszPath).c_str(), pinned, 2, &hModule, &lpContext);
 	
