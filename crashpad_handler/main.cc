@@ -30,7 +30,7 @@ inline uint64_t MakeVersion(uint8_t major, uint8_t minor, uint8_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 1, 2);
+	return MakeVersion(1, 1, 3);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -84,12 +84,13 @@ LPVOID WINAPI crashpad_handler_Builtin(HMODULE hModule, DWORD dwProcessId) {
 	};
 	HANDLE hEvent = CreateEventW(&CanInherit, TRUE, FALSE, NULL);
 	if (!hEvent) return NULL;
-	std::wstring app = wstring(windows) + L"\\..\\System32"
-#if !defined(_WIN64) && defined(_WIN32)
-		L"\\..\\SysWOW64"
-#endif
-		L"\\rundll32.exe", cmd = L"RunDLL32 \""s + dll_path.get() + L"\",crashpad_handler_RunDLL " +
+	std::wstring app = wstring(windows) + L"\\..\\System32\\rundll32.exe",
+		cmd = L"RunDLL32 \""s + dll_path.get() + L"\",crashpad_handler_RunDLL " +
 		to_wstring(dwProcessId) + L" \"" + exe_path.get() + L"\" " + to_wstring((ULONGLONG)hEvent);
+	BOOL IsWow64 = FALSE; IsWow64Process(GetCurrentProcess(), &IsWow64);
+	if (IsWow64) {
+		app = wstring(windows) + L"\\..\\SysWOW64\\rundll32.exe";
+	}
 	if (!CreateProcessW(app.c_str(), cmd.data(), NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
 		return NULL;
 	}
