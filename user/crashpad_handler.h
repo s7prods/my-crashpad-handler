@@ -212,61 +212,86 @@ extern "C" {
 #endif
 
 
+#define Internal_InitializeCrashpadHandler_Version 1001000
 
-DWORD InitializeCrashpadHandler(
-	_In_ LPCWSTR lpszExternalHandler,
+
+/// <summary>
+/// Initialize the crashpad handler
+/// </summary>
+/// <param name="hApplication">The handle of your application main module, Use NULL to automatically use the handle of the main process</param>
+/// <param name="lpszExternalHandler">The path of the handler library</param>
+/// <param name="lpszPinnedHandlerHashList">Optionally provide a list of lowercase hex format SHA-256 values to pin them to prevent tampering</param>
+/// <param name="nCountPinnedHandlerHashList">The count of the pinned handler hash list</param>
+/// <param name="lpModule">Optionally provide a output pointer to receive the loaded module so that you can uninitialize later, NEVER free it manually</param>
+/// <param name="lpContext">Optionally provide a output pointer to receive the opaque context handle so that you can uninitialize later</param>
+/// <returns>The error code. ERROR_SUCCESS means succeed</returns>
+_Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
+	_In_opt_ HMODULE hApplication,
+	_In_z_ LPCWSTR lpszExternalHandler,
 	_In_opt_count_(nCountPinnedHandlerHashList) const LPCWSTR* lpszPinnedHandlerHashList,
 	_In_ SIZE_T nCountPinnedHandlerHashList,
-	_Out_opt_ HMODULE* lpModule
+	_Out_opt_ HMODULE* lpModule,
+	_Out_opt_ LPVOID* lpContext
 ) {
 	if (lpszExternalHandler == NULL || *lpszExternalHandler == L'\0') {
 		return ERROR_INVALID_PARAMETER;
 	}
 
-	HANDLE hInput = CreateFileW(lpszExternalHandler, FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES | FILE_READ_ACCESS,
+	HANDLE hInput = CreateFileW(lpszExternalHandler, FILE_READ_DATA | FILE_READ_ATTRIBUTES,
 		FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (hInput == INVALID_HANDLE_VALUE || !hInput) {
-		return GetLastError();
+		DWORD err = GetLastError();
+		if (!err) err = 1;
+		return err;
 	}
 	if (lpszPinnedHandlerHashList != NULL) {
+		if (nCountPinnedHandlerHashList == 0) {
+			CloseHandle(hInput);
+			return ERROR_INVALID_PARAMETER;
+		}
+
 		BCRYPT_ALG_HANDLE  hAlg = NULL;
 		BCRYPT_HASH_HANDLE hHash = NULL;
-		PUCHAR             pObj = NULL;
-		BYTE               digest[32];
-		BYTE               buf[16 * 1024]{};
-		DWORD              cbObj = 0, cbResult = 0, cbRead = 0;
-		NTSTATUS           st;
-		WCHAR              actualHash[65]{};
+		PUCHAR pObj = NULL;
+		BYTE digest[32];
+		BYTE* lpBuffer;
+		const size_t cbBuffer = 16 * 1024 * sizeof(BYTE);
+		DWORD cbObj = 0, cbResult = 0, cbRead = 0;
+		NTSTATUS st = 0;
+		WCHAR actualHash[65] = { 0 };
 		static const WCHAR kHex[] = L"0123456789abcdef";
-		BOOL               matched = FALSE;
-		SIZE_T             i = 0;
-		int                k;
+		SIZE_T i = 0;
+		int k = 0;
+
+		lpBuffer = (BYTE*)VirtualAlloc(0, cbBuffer, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+		if (!lpBuffer) { CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
 		st = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM, NULL, 0);
-		if (!(st >= 0)) { CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
+		if (!(st >= 0)) { VirtualFree(lpBuffer, 0, MEM_RELEASE); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
 		st = BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH,
 			(PUCHAR)&cbObj, sizeof(cbObj), &cbResult, 0);
-		if (!(st >= 0)) { BCryptCloseAlgorithmProvider(hAlg, 0); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
+		if (!(st >= 0)) { BCryptCloseAlgorithmProvider(hAlg, 0); VirtualFree(lpBuffer, 0, MEM_RELEASE); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
 		pObj = (PUCHAR)HeapAlloc(GetProcessHeap(), 0, cbObj);
-		if (!pObj) { BCryptCloseAlgorithmProvider(hAlg, 0); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
+		if (!pObj) { BCryptCloseAlgorithmProvider(hAlg, 0); VirtualFree(lpBuffer, 0, MEM_RELEASE); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
 		st = BCryptCreateHash(hAlg, &hHash, pObj, cbObj, NULL, 0, 0);
-		if (!(st >= 0)) { HeapFree(GetProcessHeap(), 0, pObj); BCryptCloseAlgorithmProvider(hAlg, 0); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
+		if (!(st >= 0)) { HeapFree(GetProcessHeap(), 0, pObj); BCryptCloseAlgorithmProvider(hAlg, 0); VirtualFree(lpBuffer, 0, MEM_RELEASE); CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
 		for (;;) {
-			if (!ReadFile(hInput, buf, sizeof(buf), &cbRead, NULL)) {
+			if (!ReadFile(hInput, lpBuffer, cbBuffer, &cbRead, NULL)) {
 				DWORD err = GetLastError();
+				if (!err) err = 1;
 				BCryptDestroyHash(hHash); HeapFree(GetProcessHeap(), 0, pObj);
-				BCryptCloseAlgorithmProvider(hAlg, 0); CloseHandle(hInput);
+				BCryptCloseAlgorithmProvider(hAlg, 0); VirtualFree(lpBuffer, 0, MEM_RELEASE); CloseHandle(hInput);
 				return err;
 			}
 			if (cbRead == 0) break;
-			st = BCryptHashData(hHash, buf, cbRead, 0);
+			st = BCryptHashData(hHash, lpBuffer, cbRead, 0);
 			if (!(st >= 0)) {
 				BCryptDestroyHash(hHash); HeapFree(GetProcessHeap(), 0, pObj);
-				BCryptCloseAlgorithmProvider(hAlg, 0); CloseHandle(hInput);
+				BCryptCloseAlgorithmProvider(hAlg, 0); VirtualFree(lpBuffer, 0, MEM_RELEASE); CloseHandle(hInput);
 				return ERROR_NOT_ENOUGH_MEMORY;
 			}
 		}
@@ -275,6 +300,8 @@ DWORD InitializeCrashpadHandler(
 		BCryptDestroyHash(hHash);
 		HeapFree(GetProcessHeap(), 0, pObj);
 		BCryptCloseAlgorithmProvider(hAlg, 0);
+		VirtualFree(lpBuffer, 0, MEM_RELEASE);
+		lpBuffer = NULL;
 		if (!(st >= 0)) { CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
 		for (k = 0; k < 32; ++k) {
@@ -283,14 +310,15 @@ DWORD InitializeCrashpadHandler(
 		}
 		actualHash[64] = L'\0';
 
-		BOOL success = 0;
+		BOOL success = FALSE;
 		for (SIZE_T i = 0; i < nCountPinnedHandlerHashList; ++i) {
 			LPCWSTR hash = lpszPinnedHandlerHashList[i];
 			if (hash == NULL || *hash == L'\0') {
+				CloseHandle(hInput);
 				return ERROR_INVALID_PARAMETER;
 			}
 			if (wcscmp(hash, actualHash) == 0) {
-				success = true;
+				success = TRUE;
 				break;
 			}
 		}
@@ -301,6 +329,7 @@ DWORD InitializeCrashpadHandler(
 	}
 	else {
 		if (nCountPinnedHandlerHashList != 0) {
+			CloseHandle(hInput);
 			return ERROR_INVALID_PARAMETER;
 		}
 	}
@@ -308,37 +337,89 @@ DWORD InitializeCrashpadHandler(
 	HMODULE hModule = LoadLibraryW(lpszExternalHandler);
 	if (!hModule) {
 		CloseHandle(hInput);
-		return GetLastError();
+		DWORD err = GetLastError();
+		if (!err) err = 1;
+		return err;
 	}
 
 	typedef uint64_t(__stdcall* version_t)();
-	typedef VOID(WINAPI* main_t)(HMODULE, DWORD);
+	typedef LPVOID(WINAPI* main_t)(HMODULE, DWORD);
 
 	version_t Version = (version_t)GetProcAddress(hModule, "Version");
 	main_t handle_crash = (main_t)GetProcAddress(hModule, "crashpad_handler_Builtin");
 	if (!Version || !handle_crash) {
 		FreeLibrary(hModule);
 		CloseHandle(hInput);
-		return ERROR_UNSUPPORTED_TYPE;
+		return ERROR_FILE_NOT_SUPPORTED;
 	}
 	uint64_t version = Version();
-	if (version != 1000000) {
+	if (version != Internal_InitializeCrashpadHandler_Version) {
 		FreeLibrary(hModule);
 		CloseHandle(hInput);
-		return ERROR_UNSUPPORTED_TYPE;
+		return ERROR_FILE_NOT_SUPPORTED;
 	}
 
-	handle_crash(hModule, GetCurrentProcessId());
+	LPVOID ret = handle_crash(hApplication, GetCurrentProcessId()); // This is implementation-specific and do not try to hack it
+	if (!ret) {
+		DWORD err = GetLastError();
+		if (!err) err = 1;
+		FreeLibrary(hModule);
+		CloseHandle(hInput);
+		return err;
+	}
 	if (lpModule) *lpModule = hModule;
+	if (lpContext) *lpContext = ret;
+	// DO NOT release the module directly!
+	// such as the bad code:
+	//FreeLibrary(hModule);
+	// instead, always use the Uninitialize function
+	// DO NOT operate the context directly!
+	// its implementation is implementation-specific and we do not guarantee its content despite the product code is visible
+	// instead, always use the Uninitialize function
 
 	CloseHandle(hInput);
 	return ERROR_SUCCESS;
 }
 
-BOOL UninitializeCrashpadHandler(_In_ HMODULE hModule) {
+/// <summary>
+/// Uninitialize the crashpad handler
+/// </summary>
+/// <param name="hModule">The module handle returned by the initialization function</param>
+/// <param name="lpContext">The context handle returned by the initialization function</param>
+/// <returns>Whether the operation is successful or not</returns>
+static BOOL UninitializeCrashpadHandler(_In_ HMODULE hModule, _In_ LPVOID lpContext) {
+	if (!hModule || !lpContext) {
+		SetLastError(ERROR_INVALID_PARAMETER);
+		return FALSE;
+	}
+
+	typedef uint64_t(__stdcall* version_t)();
+	typedef BOOL(WINAPI* main_t)(LPVOID);
+
+	version_t Version = (version_t)GetProcAddress(hModule, "Version");
+	main_t main_func = (main_t)GetProcAddress(hModule, "crashpad_handler_Builtin_Free");
+	if (!Version || !main_func) {
+		SetLastError(ERROR_FILE_NOT_SUPPORTED);
+		return FALSE;
+	}
+	uint64_t version = Version();
+	if (version != Internal_InitializeCrashpadHandler_Version) {
+		SetLastError(ERROR_FILE_NOT_SUPPORTED);
+		return FALSE;
+	}
+
+	BOOL success = main_func(lpContext);
+	if (!success) {
+		return FALSE;
+	}
+
+	// finally release the module
 	return FreeLibrary(hModule);
 }
 
+
+
+#undef Internal_InitializeCrashpadHandler_Version
 
 #ifdef __cplusplus
 }

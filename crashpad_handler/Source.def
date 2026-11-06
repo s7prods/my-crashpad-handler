@@ -3,4 +3,5 @@
 EXPORTS
 	Version
 	crashpad_handler_Builtin
+	crashpad_handler_Builtin_Free
 	crashpad_handler_RunDLL

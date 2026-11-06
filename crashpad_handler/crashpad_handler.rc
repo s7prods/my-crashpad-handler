@@ -1,4 +1,4 @@
-﻿// Microsoft Visual C++ generated resource script.
+// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -26,8 +26,8 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_DEFAULT
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -44,12 +44,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "crashpad_handler"
             VALUE "FileDescription", "crashpad_handler"
-            VALUE "FileVersion", "1.0.0.0"
+            VALUE "FileVersion", "1.1.0.0"
             VALUE "InternalName", "crashpad_handler.dll"
             VALUE "LegalCopyright", "Copyright (C) 2026"
             VALUE "OriginalFilename", "crashpad_handler.dll"
             VALUE "ProductName", "crashpad_handler"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", "1.1.0.0"
         END
     END
     BLOCK "VarFileInfo"
@@ -58,15 +58,6 @@ BEGIN
     END
 END
 
-#endif    // 非特定语言(默认值) resources
-/////////////////////////////////////////////////////////////////////////////
-
-
-/////////////////////////////////////////////////////////////////////////////
-// 非特定语言(默认值) resources
-
-#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NEUD)
-LANGUAGE LANG_NEUTRAL, SUBLANG_DEFAULT
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -93,7 +84,7 @@ END
 
 #endif    // APSTUDIO_INVOKED
 
-#endif    //  resources
+#endif    // 非特定语言(默认值) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

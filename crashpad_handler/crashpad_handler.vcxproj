@@ -22,10 +22,13 @@
     <None Include="Source.def" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="main.cc" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\user\crashpad_handler.h" />
+    <ClInclude Include="..\user\crashpad_handler.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="errhlp.hpp" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="sdk.h" />
