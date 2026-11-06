@@ -30,7 +30,7 @@ inline uint64_t MakeVersion(uint8_t major, uint8_t minor, uint8_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 1, 0);
+	return MakeVersion(1, 1, 1);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -165,16 +165,11 @@ BOOL WINAPI crashpad_handler_Builtin_Free(LPVOID lpContext) {
 	}
 
 	// main logic is here
-
-	if (!TerminateProcess(hProcess, 0)) {
-		return false;
-	}
-
-	if (!VirtualFree(lpContext, 0, MEM_RELEASE)) {
-		return false;
-	}
-
-	return true;
+	bool bOk = true;
+	bOk = bOk && TerminateProcess(hProcess, 0);
+	bOk = bOk && CloseHandle(hProcess);
+	bOk = bOk && VirtualFree(lpContext, 0, MEM_RELEASE);
+	return bOk;
 }
 
 

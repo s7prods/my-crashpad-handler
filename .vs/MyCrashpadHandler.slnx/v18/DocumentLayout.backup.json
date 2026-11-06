@@ -1,7 +1,12 @@
 {
   "Version": 1,
   "WorkspaceRootPath": "E:\\Users\\shc07\\Code\\git\\github.com\\shc0743\\my-crashpad-handler\\",
-  "Documents": [],
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{428FBD76-0258-4577-913A-7581E1C0C3B4}|crashpad_handler\\crashpad_handler.vcxproj|E:\\Users\\shc07\\Code\\git\\github.com\\shc0743\\my-crashpad-handler\\crashpad_handler\\main.cc||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{428FBD76-0258-4577-913A-7581E1C0C3B4}|crashpad_handler\\crashpad_handler.vcxproj|solutionrelative:crashpad_handler\\main.cc||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    }
+  ],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -9,11 +14,24 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": -1,
+          "SelectedChildIndex": 1,
           "Children": [
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{d3750d8a-574b-4fb3-b7e2-aa8af40e8231}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "main.cc",
+              "DocumentMoniker": "E:\\Users\\shc07\\Code\\git\\github.com\\shc0743\\my-crashpad-handler\\crashpad_handler\\main.cc",
+              "RelativeDocumentMoniker": "crashpad_handler\\main.cc",
+              "ToolTip": "E:\\Users\\shc07\\Code\\git\\github.com\\shc0743\\my-crashpad-handler\\crashpad_handler\\main.cc",
+              "RelativeToolTip": "crashpad_handler\\main.cc",
+              "ViewState": "AgIAAJAAAAAAFpeqtOEmwKcAAAARAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2026-11-06T14:35:35.616Z",
+              "EditorCaption": ""
             }
           ]
         }
