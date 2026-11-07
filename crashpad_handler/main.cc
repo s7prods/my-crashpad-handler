@@ -32,7 +32,7 @@ inline uint64_t MakeVersion(uint16_t major, uint16_t minor, uint16_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 3, 1);
+	return MakeVersion(1, 3, 2);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -330,8 +330,6 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 
 	if (options.RestartOptions.RestartCommandLine[0]) cmd = options.RestartOptions.RestartCommandLine;
 
-	SetEvent(hEvent); CloseHandle(hEvent);
-
 	EnableDebugPrivilege();
 	DebugSetProcessKillOnExit(FALSE);
 	if (!DebugActiveProcess(pid)) {
@@ -355,6 +353,8 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 		}
 		else return;
 	});
+
+	SetEvent(hEvent); CloseHandle(hEvent);
 
 	DEBUG_EVENT ev{};
 	auto res = EnterDebugLoop(&ev, [&](const LPDEBUG_EVENT ev, LPDWORD lpdwContinueStatus) -> bool {
