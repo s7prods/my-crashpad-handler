@@ -6,7 +6,6 @@
 #pragma comment(lib, "wbemuuid.lib")
 
 HMODULE hModule;
-BOOL QueryProcessCmdLineByWMI(DWORD targetPID, std::wstring& outCmdLine);
 
 BOOL APIENTRY DllMain(HMODULE hModule,
 	DWORD  ul_reason_for_call,
@@ -25,12 +24,14 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 using namespace std;
 
 
-inline uint64_t MakeVersion(uint8_t major, uint8_t minor, uint8_t patch) {
-	return major * 1000000ULL + minor * 1000ULL + patch;
+inline uint64_t MakeVersion(uint16_t major, uint16_t minor, uint16_t patch) {
+	return static_cast<uint64_t>(major) * 1000000000000ull +
+		static_cast<uint64_t>(minor) * 1000000ull +
+		patch;
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 1, 3);
+	return MakeVersion(1, 2, 0);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -84,17 +85,20 @@ LPVOID WINAPI crashpad_handler_Builtin(HMODULE hModule, DWORD dwProcessId) {
 	};
 	HANDLE hEvent = CreateEventW(&CanInherit, TRUE, FALSE, NULL);
 	if (!hEvent) return NULL;
-	std::wstring app = wstring(windows) + L"\\..\\System32\\rundll32.exe",
-		cmd = L"RunDLL32 \""s + dll_path.get() + L"\",crashpad_handler_RunDLL " +
-		to_wstring(dwProcessId) + L" \"" + exe_path.get() + L"\" " + to_wstring((ULONGLONG)hEvent);
+	std::wstring app = wstring(windows) + L"\\..\\System32\\rundll32.exe";
 	BOOL IsWow64 = FALSE; IsWow64Process(GetCurrentProcess(), &IsWow64);
 	if (IsWow64) {
 		app = wstring(windows) + L"\\..\\SysWOW64\\rundll32.exe";
 	}
+	std::wstring AppCmdLine = GetCommandLineW();
+	std::wstring cmd = L"RunDLL32 \""s + dll_path.get() + L"\",crashpad_handler_RunDLL " +
+		to_wstring(dwProcessId) + L" \"" + exe_path.get() + L"\" " + to_wstring((ULONGLONG)hEvent) + L" " +
+		to_wstring((ULONGLONG)(ULONG_PTR)AppCmdLine.data()) + L" " +
+		to_wstring(ULONGLONG(AppCmdLine.size()) * sizeof(decltype(AppCmdLine)::value_type)) + L" ";
 	if (!CreateProcessW(app.c_str(), cmd.data(), NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
 		return NULL;
 	}
-	HANDLE objects[] = { hEvent };
+	HANDLE objects[] = { pi.hProcess, hEvent };
 	ResumeThread(pi.hThread);
 	const DWORD max_t = 30000;
 	auto die = [&hEvent, &pi] () -> LPVOID {
@@ -106,7 +110,17 @@ LPVOID WINAPI crashpad_handler_Builtin(HMODULE hModule, DWORD dwProcessId) {
 		SetLastError(err);
 		return NULL;
 	};
-	if (WAIT_TIMEOUT == WaitForMultipleObjects(1, objects, FALSE, max_t)) {
+	auto WaitResult = WaitForMultipleObjects(2, objects, FALSE, max_t);
+	if (WAIT_TIMEOUT == WaitResult) {
+		SetLastError(ERROR_TIMEOUT);
+		return die();
+	}
+	else if (WAIT_OBJECT_0 == WaitResult) {
+		DWORD code = 1;
+		if (GetExitCodeProcess(pi.hProcess, &code) && code != STILL_ACTIVE) {
+			SetLastError(code);
+		}
+		else SetLastError(ERROR_TIMEOUT);
 		return die();
 	}
 	DWORD code = 1;
@@ -114,6 +128,7 @@ LPVOID WINAPI crashpad_handler_Builtin(HMODULE hModule, DWORD dwProcessId) {
 		return die();
 	}
 	if (code != STILL_ACTIVE) {
+		SetLastError(code);
 		return die();
 	}
 	CloseHandle(hEvent);
@@ -178,20 +193,33 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 	int argc{};
 	wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
-	if (argc < 5) ExitProcess(ERROR_INVALID_PARAMETER);
+	if (argc < 7) ExitProcess(ERROR_INVALID_PARAMETER);
 
-	wstring exe = argv[3], pid_s = argv[2], sig_s = argv[4];
-	ULONGLONG pid_n = std::stoull(pid_s), sig_n = std::stoull(sig_s);
+	wstring exe = argv[3], pid_s = argv[2], sig_s = argv[4], mem_s = argv[5], cnt_s = argv[6];
+	ULONGLONG pid_n = std::stoull(pid_s), sig_n = std::stoull(sig_s), mem_n = std::stoull(mem_s), cnt_n = std::stoull(cnt_s);
 	DWORD pid = (DWORD)pid_n;
-	if (!pid || !sig_n) ExitProcess(ERROR_INVALID_PARAMETER);
+	LPCVOID mem = (LPCVOID)(UINT_PTR)mem_n; SIZE_T cnt = (SIZE_T)cnt_n;
+	if (!pid || !sig_n || !mem || !cnt) ExitProcess(ERROR_INVALID_PARAMETER);
+	if (cnt > 65536) ExitProcess(ERROR_INVALID_PARAMETER);
 
-	HANDLE hProcess = OpenProcess(GENERIC_READ | SYNCHRONIZE, FALSE, pid);
+	HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_QUERY_INFORMATION | SYNCHRONIZE |
+		PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, pid);
 	if (!hProcess) ExitProcess(GetLastError());
 	HANDLE hEvent = (HANDLE)(PVOID)sig_n;
 	DWORD code = -1;
 
 	wstring cmd;
-	QueryProcessCmdLineByWMI(pid, cmd);
+	{
+		const size_t bytes = cnt;
+		std::wstring tmp(bytes / sizeof(wstring::value_type) + 2, L'\0');
+		SIZE_T read = 0;
+		if (!ReadProcessMemory(hProcess, mem, tmp.data(), bytes, &read) || read != bytes) {
+			DWORD err = GetLastError();
+			CloseHandle(hProcess);
+			ExitProcess(err);
+		}
+		cmd = std::move(tmp);
+	}
 
 	SetEvent(hEvent); CloseHandle(hEvent);
 
@@ -224,112 +252,3 @@ clean:
 
 
 
-
-#pragma region 豆包+DeepSeek
-BOOL QueryProcessCmdLineByWMI(DWORD targetPID, std::wstring& outCmdLine)
-{
-	outCmdLine.clear();
-
-	// 1. 初始化 COM（宿主已初始化则复用；失败时不配对 CoUninitialize）
-	HRESULT hres = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-	const BOOL bUninit = SUCCEEDED(hres);
-	if (FAILED(hres) && hres != RPC_E_CHANGED_MODE)
-		return FALSE;
-
-	// 2. 设置进程级 COM 安全（每进程只能设一次，重复设置返回 RPC_E_TOO_LATE，可忽略）
-	hres = CoInitializeSecurity(
-		NULL, -1, NULL, NULL,
-		RPC_C_AUTHN_LEVEL_PKT,
-		RPC_C_IMP_LEVEL_IMPERSONATE,
-		NULL, EOAC_NONE, NULL
-	);
-	if (FAILED(hres) && hres != RPC_E_TOO_LATE) {
-		if (bUninit) CoUninitialize();
-		return FALSE;
-	}
-
-	// 3. 创建 WMI 定位器
-	IWbemLocator* pLoc = nullptr;
-	hres = CoCreateInstance(
-		CLSID_WbemLocator, 0, CLSCTX_INPROC_SERVER,
-		IID_IWbemLocator, (LPVOID*)&pLoc
-	);
-	if (FAILED(hres) || !pLoc) {
-		if (bUninit) CoUninitialize();
-		return FALSE;
-	}
-
-	// 4. 连接 root\cimv2
-	IWbemServices* pSvc = nullptr;
-	hres = pLoc->ConnectServer(
-		_bstr_t(L"ROOT\\CIMV2"),
-		NULL, NULL, 0, NULL, 0, 0,
-		&pSvc
-	);
-	pLoc->Release();
-	if (FAILED(hres) || !pSvc) {
-		if (pSvc) pSvc->Release();
-		if (bUninit) CoUninitialize();
-		return FALSE;
-	}
-
-	// 5. 设置代理安全
-	hres = CoSetProxyBlanket(
-		pSvc,
-		RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL,
-		RPC_C_AUTHN_LEVEL_PKT, RPC_C_IMP_LEVEL_IMPERSONATE,
-		NULL, EOAC_NONE
-	);
-	if (FAILED(hres)) {
-		pSvc->Release();
-		if (bUninit) CoUninitialize();
-		return FALSE;
-	}
-
-	// 6. 执行 WQL 查询
-	WCHAR wqlQuery[256]{};
-	swprintf_s(wqlQuery, L"SELECT CommandLine FROM Win32_Process WHERE ProcessId = %lu", targetPID);
-
-	IEnumWbemClassObject* pEnumerator = nullptr;
-	hres = pSvc->ExecQuery(
-		_bstr_t(L"WQL"),
-		_bstr_t(wqlQuery),
-		WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
-		NULL,
-		&pEnumerator
-	);
-	pSvc->Release();
-	if (FAILED(hres) || !pEnumerator) {
-		if (pEnumerator) pEnumerator->Release();
-		if (bUninit) CoUninitialize();
-		return FALSE;
-	}
-
-	// 7. 取结果（一个 PID 最多一行）
-	IWbemClassObject* pclsObj = nullptr;
-	ULONG uReturn = 0;
-	hres = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
-	pEnumerator->Release();
-	if (FAILED(hres) || uReturn == 0 || !pclsObj) {
-		if (pclsObj) pclsObj->Release();
-		if (bUninit) CoUninitialize();
-		return FALSE;
-	}
-
-	// 8. 读取 CommandLine
-	VARIANT vtProp;
-	VariantInit(&vtProp);
-	hres = pclsObj->Get(L"CommandLine", 0, &vtProp, NULL, NULL);
-	pclsObj->Release();
-
-	BOOL ok = FALSE;
-	if (SUCCEEDED(hres) && vtProp.vt == VT_BSTR && vtProp.bstrVal != nullptr) {
-		outCmdLine.assign(vtProp.bstrVal, SysStringLen(vtProp.bstrVal));
-		ok = TRUE;
-	}
-	VariantClear(&vtProp);
-
-	if (bUninit) CoUninitialize();
-	return ok;
-}
-#pragma endregion

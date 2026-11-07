@@ -28,24 +28,28 @@ LONG WINAPI myfilter(
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 
-int helphelp(unsigned int value) {
-	return helphelp(value + 1);
+int helphelp() {
+	return helphelp();
 }
 
 int main() {
-	SetUnhandledExceptionFilter(myfilter);
-
 	char lpszPath[2048];
 	cout << "Please input the path of MyCrashPadHandler!" << endl;
 	cin.getline(lpszPath, 2048);
 	
 	HMODULE hModule{};
 	LPVOID lpContext{};
+#ifndef _DEBUG
 	const wchar_t* pinned[] = {
-		L"ce338b258f16475ae5b1286bc724dfa5d7c5bc47322faa3f4154c96a37bea8ce",
-		L"e5c9c8bee500d27d6dd0303bfd404c7567acce0e10476c108893aa7df247f390",
+		L"21935dc05248148761655de8375cc4eb0642ee3b6e531ce607e1b820c2286463",
+		L"4ea2b278f0318dacef7e86730e0d870816175db6abae524a8fe033751765d5a3",
 	};
-	auto res = InitializeCrashpadHandler(NULL, s2ws(lpszPath).c_str(), pinned, 2, &hModule, &lpContext);
+	const SIZE_T pinnedCount = 2;
+#else
+	const wchar_t** pinned = NULL;
+	const SIZE_T pinnedCount = 0;
+#endif
+	auto res = InitializeCrashpadHandler(NULL, s2ws(lpszPath).c_str(), pinned, pinnedCount, &hModule, &lpContext);
 	
 	cout << "Init result: " << res << " indicates " << (!!res ? "failure" : "success") << endl;
 	
@@ -96,10 +100,11 @@ int main() {
 			return code;
 		}
 		else if (chosen == "4") {
+			SetUnhandledExceptionFilter(myfilter);
 			((void(*)())((ULONG_PTR)(0xdeaddeaddeaddeadull)))();
 		}
 		else if (chosen == "5") {
-			helphelp(0);
+			helphelp();
 		}
 		else if (chosen == "6") {
 			uint64_t* lp = new uint64_t;
@@ -140,12 +145,15 @@ int main() {
 			HeapDestroy(heap);
 		}
 		else if (chosen == "8") {
+			SetUnhandledExceptionFilter(myfilter);
 			__fastfail(2);
 		}
 		else if (chosen == "9") {
+			SetUnhandledExceptionFilter(myfilter);
 			RaiseFailFastException(NULL, NULL, FAIL_FAST_GENERATE_EXCEPTION_ADDRESS);
 		}
 		else if (chosen == "10") {
+			SetUnhandledExceptionFilter(myfilter);
 			CONTEXT ctx{}; ctx.ContextFlags = CONTEXT_FULL; RtlCaptureContext(&ctx);
 			EXCEPTION_RECORD exc{}; exc.ExceptionCode = 0xC000000C; exc.ExceptionAddress = _ReturnAddress();
 			RaiseFailFastException(&exc, &ctx, 0);
