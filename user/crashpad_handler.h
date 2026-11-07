@@ -1,7 +1,8 @@
 ﻿#pragma once
-// Version: 1.2.0
+// Version: 1.3.0
 #include <Windows.h>
 #include <bcrypt.h>
+#include <DbgHelp.h>
 #include <stdint.h>
 #pragma comment(lib, "bcrypt.lib")
 /*
@@ -213,8 +214,51 @@ extern "C" {
 #endif
 
 
-#define Internal_InitializeCrashpadHandler_Version 1000002000000ull
+#define Internal_InitializeCrashpadHandler_Version 1000003000000ull
 
+
+
+
+/// <summary>
+/// The options for InitializeCrashpadHandler
+/// </summary>
+#pragma pack(push, 1)
+struct InitializeCrashpadHandlerOptions {
+	DWORD cb;
+	struct {
+		// Some error dialogs appear even if you turned AutoRestart on. If you want to suppress all dialogs please set this
+		BOOL SuppressErrorDialogs;
+	} CrashOptions;
+	struct {
+		BOOL bEnableDump;
+		MINIDUMP_TYPE DumpType;
+		WCHAR DumpDirectory[1536];
+		WCHAR CustomizedDumpNameFormat[512]; // {exe} = executable name; {exe-} = exe without suffix; {pid} = PID; {ts} = timestamp
+		BOOL WithContext;
+		WCHAR CustomizedContextNameFormat[512]; // see also CustomizedDumpNameFormat
+	} DumpOptions;
+	struct {
+		BOOL bDisallowUserRestart;
+		WCHAR RestartCommandLine[32768];
+		// Important: You should try to maintain this field in a real product, otherwise the application may restart endlessly
+		UINT RestartCount;
+		// If the increased RestartCount is greater than MaxRestartCount (e.g. you give RestartCount=0,Max=1, the actual compared 
+		// expression is `1>1` which is false; then you give RestartCount=1,Max=1, `2>1` is compared and it blocks further restart)
+		// special rule: If MaxRestartCount=0 and AutoRestart=0, actually restart is allowed (but manually prompted to the user); if
+		// MaxRestartCount=0 and AutoRestart=1 then the entire restart functionality is blocked. (the user might be prompted according
+		// to SuppressErrorDialogs=0 but the restart option will be disabled)
+		UINT MaxRestartCount;
+		BOOL AutoRestart;
+		struct {
+			BOOL bAddRecoveryInformationInRestart;
+			WCHAR AddCustomString[256];
+			BOOL AddRestartCount;
+			WCHAR AddRestartCountPrefix[32];
+			WCHAR AddRestartCountSuffix[32];
+		} AddRecoveryInformationOptions;
+	} RestartOptions;
+};
+#pragma pack(pop)
 
 /// <summary>
 /// Initialize the crashpad handler
@@ -223,6 +267,7 @@ extern "C" {
 /// <param name="lpszExternalHandler">The path of the handler library</param>
 /// <param name="lpszPinnedHandlerHashList">Optionally provide a list of lowercase hex format SHA-256 values to pin them to prevent tampering</param>
 /// <param name="nCountPinnedHandlerHashList">The count of the pinned handler hash list</param>
+/// <param name="lpOptions">Optionally provide a crashpad handler option</param>
 /// <param name="lpModule">Optionally provide a output pointer to receive the loaded module so that you can uninitialize later, NEVER free it manually</param>
 /// <param name="lpContext">Optionally provide a output pointer to receive the opaque context handle so that you can uninitialize later</param>
 /// <returns>The error code. ERROR_SUCCESS means succeed</returns>
@@ -231,6 +276,7 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 	_In_z_ LPCWSTR lpszExternalHandler,
 	_In_opt_count_(nCountPinnedHandlerHashList) const LPCWSTR* lpszPinnedHandlerHashList,
 	_In_ SIZE_T nCountPinnedHandlerHashList,
+	_In_opt_ const InitializeCrashpadHandlerOptions* lpOptions,
 	_Out_opt_ HMODULE* lpModule,
 	_Out_opt_ LPVOID* lpContext
 ) {
@@ -344,7 +390,7 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 	}
 
 	typedef uint64_t(__stdcall* version_t)();
-	typedef LPVOID(WINAPI* main_t)(HMODULE, DWORD);
+	typedef LPVOID(WINAPI* main_t)(HMODULE, DWORD, const InitializeCrashpadHandlerOptions*);
 
 	version_t Version = (version_t)GetProcAddress(hModule, "Version");
 	main_t handle_crash = (main_t)GetProcAddress(hModule, "crashpad_handler_Builtin");
@@ -360,7 +406,7 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 		return ERROR_FILE_NOT_SUPPORTED;
 	}
 
-	LPVOID ret = handle_crash(hApplication, GetCurrentProcessId()); // This is implementation-specific and do not try to hack it
+	LPVOID ret = handle_crash(hApplication, GetCurrentProcessId(), lpOptions); // This is implementation-specific and do not try to hack it
 	if (!ret) {
 		DWORD err = GetLastError();
 		if (!err) err = 1;
@@ -387,11 +433,10 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 /// </summary>
 /// <param name="hModule">The module handle returned by the initialization function</param>
 /// <param name="lpContext">The context handle returned by the initialization function</param>
-/// <returns>Whether the operation is successful or not</returns>
-static BOOL UninitializeCrashpadHandler(_In_ HMODULE hModule, _In_ LPVOID lpContext) {
+/// <returns>The error code. ERROR_SUCCESS means succeed</returns>
+_Success_(return == ERROR_SUCCESS) static DWORD UninitializeCrashpadHandler(_In_ HMODULE hModule, _In_ LPVOID lpContext) {
 	if (!hModule || !lpContext) {
-		SetLastError(ERROR_INVALID_PARAMETER);
-		return FALSE;
+		return ERROR_INVALID_PARAMETER;
 	}
 
 	typedef uint64_t(__stdcall* version_t)();
@@ -400,22 +445,28 @@ static BOOL UninitializeCrashpadHandler(_In_ HMODULE hModule, _In_ LPVOID lpCont
 	version_t Version = (version_t)GetProcAddress(hModule, "Version");
 	main_t main_func = (main_t)GetProcAddress(hModule, "crashpad_handler_Builtin_Free");
 	if (!Version || !main_func) {
-		SetLastError(ERROR_FILE_NOT_SUPPORTED);
-		return FALSE;
+		return ERROR_FILE_NOT_SUPPORTED;
 	}
 	uint64_t version = Version();
 	if (version != Internal_InitializeCrashpadHandler_Version) {
-		SetLastError(ERROR_FILE_NOT_SUPPORTED);
-		return FALSE;
+		return ERROR_FILE_NOT_SUPPORTED;
 	}
 
 	BOOL success = main_func(lpContext);
 	if (!success) {
-		return FALSE;
+		DWORD err = GetLastError();
+		if (!err) err = 1;
+		return err;
 	}
 
 	// finally release the module
-	return FreeLibrary(hModule);
+	success = FreeLibrary(hModule);
+	if (!success) {
+		DWORD err = GetLastError();
+		if (!err) err = 1;
+		return err;
+	}
+	return ERROR_SUCCESS;
 }
 
 

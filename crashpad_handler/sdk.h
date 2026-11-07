@@ -19,5 +19,7 @@
 #include <VersionHelpers.h>
 #include <string>
 #include <algorithm>
+#include <thread>
+#include <functional>
 #include <stdlib.h>
 #include <stdint.h>

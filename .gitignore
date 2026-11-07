@@ -52,5 +52,8 @@ CopilotIndices
 *.pdb
 *.exp
 *.lib
+/.vs
+*.dll
+*.exe
 
 

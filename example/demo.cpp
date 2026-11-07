@@ -2,7 +2,13 @@
 #include <string>
 #include <format>
 #include "../user/crashpad_handler.h"
+#include "argparse.hpp"
 using namespace std;
+
+const wchar_t* GlobalReleasePinnedList[] = {
+	L"add47056b6a3b205e74c16a5e1c14f70bb9f2be3c3fa48716530260378c5a1c7",
+	L"354b1082ce47df0e16a1e25d2176dc89bd3df0090adf2a3c3161c5cdb76773f9",
+};
 
 inline wstring s2ws(const string& str) {
 	wstring result;
@@ -32,24 +38,72 @@ int helphelp() {
 	return helphelp();
 }
 
-int main() {
+int main(int argc, char** argv) {
+	argparse::ArgumentParser program("demo");
+	program.add_argument("--is-restart").help("is restart").default_value(false).implicit_value(true);
+	program.add_argument("--restart-count")
+		.help("restart count")
+		.nargs(1);
+	try { program.parse_args(argc, argv); }
+	catch (const std::exception& err) {}
+
+	if (program.get<bool>("--is-restart")) {
+		cout << "Is restart!!!" << endl;
+		if (program.present("--restart-count")) try {
+			std::string b_val = program.get<std::string>("--restart-count");
+			cout << "Restart count: " << b_val << endl;
+		}
+		catch (...) {}
+	}
+
 	char lpszPath[2048];
-	cout << "Please input the path of MyCrashPadHandler!" << endl;
+	cout << "Please input the path of MyCrashPadHandler: ";
+	cout.flush();
 	cin.getline(lpszPath, 2048);
+	char buffer2[16]{};
+	cout << "Do you want to customize options? ";
+	cin.getline(buffer2, 16);
+	auto options = make_unique<InitializeCrashpadHandlerOptions>();
+	options->cb = sizeof(InitializeCrashpadHandlerOptions);
+	options->DumpOptions.bEnableDump = true;
+	options->DumpOptions.DumpType = MiniDumpWithFullMemory;
+	options->DumpOptions.WithContext = true;
+	if (program.present("--restart-count")) try {
+		std::string b_val = program.get<std::string>("--restart-count");
+		options->RestartOptions.RestartCount = stoul(b_val);
+	} catch (...) {}
+	options->RestartOptions.MaxRestartCount = 3;
+	options->RestartOptions.AddRecoveryInformationOptions.bAddRecoveryInformationInRestart = true;
+	options->RestartOptions.AddRecoveryInformationOptions.AddRestartCount = true;
+	wcscpy_s(options->RestartOptions.RestartCommandLine, L"App"); // change to your real command line or if your app dont need cmdline just use placeholder like this. Do not forget to remove already-existing --restart-count! Otherwise it will duplicate
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddRestartCountPrefix, L"--restart-count=\"");
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddRestartCountSuffix, L"\"");
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddCustomString, L"--is-restart");
 	
 	HMODULE hModule{};
 	LPVOID lpContext{};
-#ifndef _DEBUG
-	const wchar_t* pinned[] = {
-		L"21935dc05248148761655de8375cc4eb0642ee3b6e531ce607e1b820c2286463",
-		L"4ea2b278f0318dacef7e86730e0d870816175db6abae524a8fe033751765d5a3",
-	};
+#ifdef NDEBUG
+	const wchar_t** pinned = GlobalReleasePinnedList;
 	const SIZE_T pinnedCount = 2;
 #else
 	const wchar_t** pinned = NULL;
 	const SIZE_T pinnedCount = 0;
 #endif
-	auto res = InitializeCrashpadHandler(NULL, s2ws(lpszPath).c_str(), pinned, pinnedCount, &hModule, &lpContext);
+	if (buffer2 == "y"s || buffer2 == "Y"s) {
+		cout << "Do you want to suppress dialogs? ";
+		cin.getline(buffer2, 16);
+		if (buffer2 == "y"s || buffer2 == "Y"s) options->CrashOptions.SuppressErrorDialogs = true;
+		cout << "Do you want to disallow user restart? ";
+		cin.getline(buffer2, 16);
+		if (buffer2 == "y"s || buffer2 == "Y"s) options->RestartOptions.bDisallowUserRestart = true;
+		cout << "Do you want to auto restart? ";
+		cin.getline(buffer2, 16);
+		if (buffer2 == "y"s || buffer2 == "Y"s) options->RestartOptions.AutoRestart = true;
+	}
+	else {
+		options = nullptr;
+	}
+	auto res = InitializeCrashpadHandler(NULL, s2ws(lpszPath).c_str(), pinned, pinnedCount, options.get(), &hModule, &lpContext);
 	
 	cout << "Init result: " << res << " indicates " << (!!res ? "failure" : "success") << endl;
 	
@@ -77,17 +131,20 @@ int main() {
 			return 0;
 		}
 		else if (chosen == "1" || chosen == "2") {
+			DWORD res = 0;
 			if (!hModule || !lpContext) {
+				if (chosen == "2") goto b_2_2;
 				cout << "Not initialized, cannot uninit" << endl;
 				continue;
 			} 
-			auto res = UninitializeCrashpadHandler(hModule, lpContext);
+			res = UninitializeCrashpadHandler(hModule, lpContext);
 			cout << "res: " << res << endl;
-			if (res) {
+			if (0 == res) {
 				hModule = 0;
 				lpContext = 0;
 			}
 			if (chosen == "2") {
+				b_2_2:
 				cout << "Going to exit..." << endl;
 				Sleep(2000);
 				break;
