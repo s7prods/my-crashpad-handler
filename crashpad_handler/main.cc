@@ -1,7 +1,9 @@
 ﻿#include "./sdk.h"
 #include <filesystem>
+#include "hacked.hpp"
 #include "errhlp.hpp"
 #include "dbghlp.hpp"
+#include "psphlp.hpp"
 #include "../user/crashpad_handler.h"
 
 HMODULE hModule;
@@ -30,19 +32,11 @@ inline uint64_t MakeVersion(uint16_t major, uint16_t minor, uint16_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 3, 0);
+	return MakeVersion(1, 3, 1);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
 
-
-static PVOID GetK32(const char* name) {
-	HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
-	if (!k32) { __fastfail(FAST_FAIL_STACK_COOKIE_CHECK_FAILURE); }
-	auto GetProcAddress = reinterpret_cast<decltype(&::GetProcAddress)>(::GetProcAddress(k32, "GetProcAddress"));
-	if (!GetProcAddress) { __fastfail(FAST_FAIL_STACK_COOKIE_CHECK_FAILURE); }
-	return GetProcAddress(k32, name);
-}
 
 static wstring& str_replace(std::wstring& strBase, const std::wstring strSrc, const std::wstring strDes) {
 	wstring::size_type pos = 0;
@@ -259,13 +253,18 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 		LocalFree(argv);
 		ExitProcess(ERROR_INVALID_DATA);
 	}
+	if (GetParentIdentifier(GetCurrentProcessId()) != pid) {
+		LocalFree(argv);
+		ExitProcess(ERROR_ACCESS_DENIED);
+	}
 
 	wstring exe_path = filesystem::path(exe).parent_path().wstring();
 	wstring exe_pure = filesystem::path(exe).filename().wstring();
 	wstring exe_stem = filesystem::path(exe).stem().wstring();
+	wstring queried_exe_path;
 
 	HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_QUERY_INFORMATION | SYNCHRONIZE |
-		PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE | STANDARD_RIGHTS_REQUIRED, FALSE, pid);
+		PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE, FALSE, pid);
 	if (!hProcess) {
 		DWORD err = GetLastError();
 		LocalFree(argv);
@@ -275,6 +274,19 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 	HANDLE hExitEvent = (HANDLE)(PVOID)ext_n;
 	HANDLE hExitEventPeer = (HANDLE)(PVOID)per_n;
 	DWORD code = -1;
+
+	{
+		DWORD sizeChars = 32768;
+		auto buffer = make_unique<WCHAR[]>(sizeChars);
+		BOOL ok = QueryFullProcessImageNameW(hProcess, 0, buffer.get(), &sizeChars);
+		if (!ok || buffer.get() != exe) {
+			buffer.reset();
+			DWORD err = GetLastError();
+			CloseHandle(hProcess);
+			LocalFree(argv);
+			ExitProcess(err);
+		}
+	}
 
 	wstring cmd;
 	{
@@ -418,7 +430,8 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 					info.ThreadId = ev->dwThreadId;
 					info.ExceptionPointers = &ep;
 					info.ClientPointers = NULL;
-					MiniDumpWriteDump(hProcess, pid, hFile, options.DumpOptions.DumpType, &info, NULL, NULL);
+					
+					HackedMiniDumpWriteDump(hProcess, pid, hFile, options.DumpOptions.DumpType, &info, NULL, NULL);
 					CloseHandle(hFile);
 				}
 				

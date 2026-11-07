@@ -1,5 +1,5 @@
 ﻿#pragma once
-// Version: 1.3.0
+// Version: 1.3.1
 #include <Windows.h>
 #include <bcrypt.h>
 #include <DbgHelp.h>
@@ -214,7 +214,7 @@ extern "C" {
 #endif
 
 
-#define Internal_InitializeCrashpadHandler_Version 1000003000000ull
+#define Internal_InitializeCrashpadHandler_Version 1000003000001ull
 
 
 
@@ -225,6 +225,9 @@ extern "C" {
 #pragma pack(push, 1)
 struct InitializeCrashpadHandlerOptions {
 	DWORD cb;
+	struct {
+		BOOL LoadFullQualified; // if used, please give full qualified dll path. Can be used to enhance security
+	} LoadOptions;
 	struct {
 		// Some error dialogs appear even if you turned AutoRestart on. If you want to suppress all dialogs please set this
 		BOOL SuppressErrorDialogs;
@@ -381,7 +384,9 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 		}
 	}
 
-	HMODULE hModule = LoadLibraryW(lpszExternalHandler);
+	HMODULE hModule = NULL;
+	if (lpOptions && lpOptions->LoadOptions.LoadFullQualified) hModule = LoadLibraryExW(lpszExternalHandler, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+	else hModule = LoadLibraryW(lpszExternalHandler);
 	if (!hModule) {
 		CloseHandle(hInput);
 		DWORD err = GetLastError();

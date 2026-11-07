@@ -31,6 +31,8 @@
     </ClInclude>
     <ClInclude Include="dbghlp.hpp" />
     <ClInclude Include="errhlp.hpp" />
+    <ClInclude Include="hacked.hpp" />
+    <ClInclude Include="psphlp.hpp" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="sdk.h" />
   </ItemGroup>

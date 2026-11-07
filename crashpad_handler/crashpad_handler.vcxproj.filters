@@ -43,6 +43,12 @@
     <ClInclude Include="dbghlp.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="hacked.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="psphlp.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="crashpad_handler.rc">

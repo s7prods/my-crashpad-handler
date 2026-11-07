@@ -17,6 +17,7 @@
 #include <Windows.h>
 #include <Uxtheme.h>
 #include <VersionHelpers.h>
+#include <tlhelp32.h>
 #include <string>
 #include <algorithm>
 #include <thread>
