@@ -28,6 +28,8 @@ inline wstring s2ws(const string& str) {
 LONG WINAPI myfilter(
 	_In_ struct _EXCEPTION_POINTERS* ExceptionInfo
 ) {
+	// Note: If the exception is handled by crashpad_handler, the top level exception handler might not be executed,
+	// so please do not rely on it when using the product
 	cout << format("\n\nException!!!\nCode : {}\nAddress : {}", ExceptionInfo->ExceptionRecord->ExceptionCode, ExceptionInfo->ExceptionRecord->ExceptionAddress) << endl;
 	cerr << "execute fault now!\n";
 	return EXCEPTION_EXECUTE_FAULT;
@@ -59,14 +61,14 @@ int main(int argc, char** argv) {
 	char lpszPath[2048];
 	cout << "Please input the path of MyCrashPadHandler: ";
 	cout.flush();
-	cin.getline(lpszPath, 2048);LoadLibraryA(lpszPath);
+	cin.getline(lpszPath, 2048);
 	char buffer2[16]{};
 	cout << "Do you want to customize options? ";
 	cin.getline(buffer2, 16);
-	auto options = make_unique<InitializeCrashpadHandlerOptions>();
+	auto options = make_unique<InitializeCrashpadHandlerOptions>(); // avoid creating the structure on stack
 	options->cb = sizeof(InitializeCrashpadHandlerOptions);
 	options->DumpOptions.bEnableDump = true;
-	options->DumpOptions.DumpType = MiniDumpWithFullMemory;
+	options->DumpOptions.DumpType = MiniDumpWithFullMemory; // Please decide this according to your app, blindly use FullMemory may seriously impact performance and disk space
 	options->DumpOptions.WithContext = true;
 	if (program.present("--restart-count")) try {
 		std::string b_val = program.get<std::string>("--restart-count");
@@ -122,6 +124,7 @@ int main(int argc, char** argv) {
 		cout << "8. Trigger fast fail method native" << endl;
 		cout << "9. Trigger fast fail method syscall" << endl;
 		cout << "10. Trigger fast fail method custom syscall" << endl;
+		cout << "11. Use structured exception handling" << endl;
 		cout << "Please choose: ";
 		cout.flush();
 		cin.getline(choice, 16);
@@ -131,6 +134,9 @@ int main(int argc, char** argv) {
 			return 0;
 		}
 		else if (chosen == "1" || chosen == "2") {
+			// Important: For most applications you do NOT need to manually uninitialize the handler
+			// because it will automatically end after your application exits. Only uninitialize 
+			// manually if you want to initialize again or you have other special requirements
 			DWORD res = 0;
 			if (!hModule || !lpContext) {
 				if (chosen == "2") goto b_2_2;
@@ -158,7 +164,7 @@ int main(int argc, char** argv) {
 		}
 		else if (chosen == "4") {
 			SetUnhandledExceptionFilter(myfilter);
-			((void(*)())((ULONG_PTR)(0xdeaddeaddeaddeadull)))();
+			cout << *((int*)((ULONG_PTR)(0xdeaddeaddeaddeadull)));
 		}
 		else if (chosen == "5") {
 			helphelp();
@@ -214,6 +220,15 @@ int main(int argc, char** argv) {
 			CONTEXT ctx{}; ctx.ContextFlags = CONTEXT_FULL; RtlCaptureContext(&ctx);
 			EXCEPTION_RECORD exc{}; exc.ExceptionCode = 0xC000000C; exc.ExceptionAddress = _ReturnAddress();
 			RaiseFailFastException(&exc, &ctx, 0);
+		}
+		else if (chosen == "11") {
+			int r = ([] () -> int {
+				__try { return *((int*)0xdead); }
+				__except (EXCEPTION_EXECUTE_HANDLER) {
+					return 1;
+				}
+			})();
+			cout << "Result: " << r << endl;
 		}
 		else {
 			cout << "Invalid input!" << endl;
