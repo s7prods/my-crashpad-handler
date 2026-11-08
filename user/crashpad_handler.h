@@ -1,9 +1,13 @@
 ﻿#pragma once
-// Version: 1.3.2
+// Version: 1.4.0
 #include <Windows.h>
 #include <bcrypt.h>
 #include <DbgHelp.h>
+#ifdef __cplusplus
+#include <cstdint>
+#else
 #include <stdint.h>
+#endif
 #pragma comment(lib, "bcrypt.lib")
 /*
 								 Apache License
@@ -214,7 +218,7 @@ extern "C" {
 #endif
 
 
-#define Internal_InitializeCrashpadHandler_Version 1000003000002ull
+#define Internal_InitializeCrashpadHandler_Version 1000004000000ull
 
 
 
@@ -223,44 +227,54 @@ extern "C" {
 /// The options for InitializeCrashpadHandler
 /// </summary>
 #pragma pack(push, 1)
-struct InitializeCrashpadHandlerOptions {
+typedef struct InitializeCrashpadHandlerOptions_t {
 	DWORD cb;
-	struct {
+	// The LoadOptions only affect loads that uses the InitializeCrashpadHandler; they do not impact the product itself
+	struct _LoadOptions {
 		BOOL LoadFullQualified; // if used, please give full qualified dll path. Can be used to enhance security
+		BOOL LoadMustPinHash; // if used, you must provide hash list to pin, or the function will not work.
 	} LoadOptions;
-	struct {
+	struct _AttachOptions {
+		BOOL NoAttachDebugger; // if on, the debugger will not be attached and the product works as a watchdog and cannot produce any dump
+	} AttachOptions;
+	struct _CrashOptions {
 		// Some error dialogs appear even if you turned AutoRestart on. If you want to suppress all dialogs please set this
 		BOOL SuppressErrorDialogs;
 	} CrashOptions;
-	struct {
-		BOOL bEnableDump;
-		MINIDUMP_TYPE DumpType;
-		WCHAR DumpDirectory[1536];
-		WCHAR CustomizedDumpNameFormat[512]; // {exe} = executable name; {exe-} = exe without suffix; {pid} = PID; {ts} = timestamp
+	struct _DumpOptions {
+		BOOL EnableDump;
+		MINIDUMP_TYPE DumpType; // required if EnableDump; otherwise optional
+		WCHAR DumpDirectory[1536]; // optional; defaults to application directory
+		WCHAR CustomizedDumpNameFormat[512]; // optional; {exe} = executable name; {exe-} = exe without suffix; {pid} = PID; {ts} = timestamp
 		BOOL WithContext;
-		WCHAR CustomizedContextNameFormat[512]; // see also CustomizedDumpNameFormat
+		WCHAR CustomizedContextNameFormat[512]; // see also: CustomizedDumpNameFormat
 	} DumpOptions;
-	struct {
-		BOOL bDisallowUserRestart;
-		WCHAR RestartCommandLine[32768];
-		// Important: You should try to maintain this field in a real product, otherwise the application may restart endlessly
-		UINT RestartCount;
+	struct _RestartOptions {
+		BOOL DisallowRestart; // Do not restart the application after crash
+		WCHAR RestartCommandLine[32768]; // optional; defaults to the process command line; recommended to set manually, otherwise some parameters may duplicate
+		UINT RestartCount; // Important: You should try to maintain this field in a real product, otherwise the application may restart endlessly
 		// If the increased RestartCount is greater than MaxRestartCount (e.g. you give RestartCount=0,Max=1, the actual compared 
 		// expression is `1>1` which is false; then you give RestartCount=1,Max=1, `2>1` is compared and it blocks further restart)
 		// special rule: If MaxRestartCount=0 and AutoRestart=0, actually restart is allowed (but manually prompted to the user); if
 		// MaxRestartCount=0 and AutoRestart=1 then the entire restart functionality is blocked. (the user might be prompted according
 		// to SuppressErrorDialogs=0 but the restart option will be disabled)
 		UINT MaxRestartCount;
-		BOOL AutoRestart;
-		struct {
-			BOOL bAddRecoveryInformationInRestart;
+		BOOL AutoRestart; // The AutoRestart will not take effect if DisallowRestart is on
+		struct _AddRecoveryInformationOptions {
+			BOOL AddRecoveryInformationInRestart; // if off, the whole AddRecoveryInformationOptions will not work
 			WCHAR AddCustomString[256];
 			BOOL AddRestartCount;
 			WCHAR AddRestartCountPrefix[32];
 			WCHAR AddRestartCountSuffix[32];
+			BOOL AddDumpFilePath;
+			WCHAR AddDumpFilePathPrefix[32];
+			WCHAR AddDumpFilePathSuffix[32];
+			BOOL AddDumpContextPath;
+			WCHAR AddDumpContextPathPrefix[32];
+			WCHAR AddDumpContextPathSuffix[32];
 		} AddRecoveryInformationOptions;
 	} RestartOptions;
-};
+} InitializeCrashpadHandlerOptions, * PInitializeCrashpadHandlerOptions;
 #pragma pack(pop)
 
 /// <summary>
@@ -279,12 +293,18 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 	_In_z_ LPCWSTR lpszExternalHandler,
 	_In_opt_count_(nCountPinnedHandlerHashList) const LPCWSTR* lpszPinnedHandlerHashList,
 	_In_ SIZE_T nCountPinnedHandlerHashList,
-	_In_opt_ const InitializeCrashpadHandlerOptions* lpOptions,
+	_In_opt_ const PInitializeCrashpadHandlerOptions lpOptions,
 	_Out_opt_ HMODULE* lpModule,
 	_Out_opt_ LPVOID* lpContext
 ) {
+#ifdef __cplusplus
+	using namespace std;
+#endif
 	if (lpszExternalHandler == NULL || *lpszExternalHandler == L'\0') {
 		return ERROR_INVALID_PARAMETER;
+	}
+	if (lpOptions && (lpOptions->cb != sizeof(InitializeCrashpadHandlerOptions))) {
+		return ERROR_FILE_NOT_SUPPORTED;
 	}
 
 	HANDLE hInput = CreateFileW(lpszExternalHandler, FILE_READ_DATA | FILE_READ_ATTRIBUTES,
@@ -311,7 +331,6 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 		WCHAR actualHash[65] = { 0 };
 		static const WCHAR kHex[] = L"0123456789abcdef";
 		SIZE_T i = 0;
-		int k = 0;
 
 		lpBuffer = (BYTE*)VirtualAlloc(0, cbBuffer, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 		if (!lpBuffer) { CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
@@ -354,6 +373,7 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 		lpBuffer = NULL;
 		if (!(st >= 0)) { CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
 
+		UINT_PTR k = 0;
 		for (k = 0; k < 32; ++k) {
 			actualHash[k * 2] = kHex[digest[k] >> 4];
 			actualHash[k * 2 + 1] = kHex[digest[k] & 0x0F];
@@ -382,6 +402,10 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 			CloseHandle(hInput);
 			return ERROR_INVALID_PARAMETER;
 		}
+		if (lpOptions && lpOptions->LoadOptions.LoadMustPinHash) {
+			CloseHandle(hInput);
+			return ERROR_SYSTEM_INTEGRITY_POLICY_VIOLATION;
+		}
 	}
 
 	HMODULE hModule = NULL;
@@ -395,7 +419,7 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 	}
 
 	typedef uint64_t(__stdcall* version_t)();
-	typedef LPVOID(WINAPI* main_t)(HMODULE, DWORD, const InitializeCrashpadHandlerOptions*);
+	typedef LPVOID(WINAPI* main_t)(HMODULE, DWORD, const PInitializeCrashpadHandlerOptions);
 
 	version_t Version = (version_t)GetProcAddress(hModule, "Version");
 	main_t handle_crash = (main_t)GetProcAddress(hModule, "crashpad_handler_Builtin");

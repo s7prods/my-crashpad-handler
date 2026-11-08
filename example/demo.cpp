@@ -6,11 +6,11 @@
 using namespace std;
 
 const wchar_t* GlobalReleasePinnedList[] = {
-	L"5d6aeb45bfe71449f6c91c1d4585d57bbc3d62bf7cf3767a17d79e0bcec32dde",
-	L"bf0a17b36ba2b588dc6ed88e7a1d43025ca03d112db940272e93591d70eceda9",
+	L"cf4981108cd1665801a0e2c2de889d2e88974a49119b3e9551bed855d21ee42b",
+	L"a36e314a63bbce35d9a4aa64e4df6590d1894e21c8e3c78afb19cf56c244ac3b",
 };
 
-inline wstring s2ws(const string& str) {
+inline static wstring s2ws(const string& str) {
 	wstring result;
 	size_t len = MultiByteToWideChar(CP_ACP, 0, str.c_str(),
 		(int)(str.size()), NULL, 0);
@@ -25,7 +25,7 @@ inline wstring s2ws(const string& str) {
 	return result;
 }
 
-LONG WINAPI myfilter(
+static LONG WINAPI myfilter(
 	_In_ struct _EXCEPTION_POINTERS* ExceptionInfo
 ) {
 	// Note: If the exception is handled by crashpad_handler, the top level exception handler might not be executed,
@@ -36,7 +36,7 @@ LONG WINAPI myfilter(
 	return EXCEPTION_CONTINUE_SEARCH;
 }
 
-int helphelp() {
+static int helphelp() {
 	return helphelp();
 }
 
@@ -46,8 +46,14 @@ int main(int argc, char** argv) {
 	program.add_argument("--restart-count")
 		.help("restart count")
 		.nargs(1);
+	program.add_argument("--dump-file")
+		.help("dump-file")
+		.nargs(1);
+	program.add_argument("--dump-ctx")
+		.help("dump-ctx")
+		.nargs(1);
 	try { program.parse_args(argc, argv); }
-	catch (const std::exception& err) {}
+	catch (const std::exception&) {}
 
 	if (program.get<bool>("--is-restart")) {
 		cout << "Is restart!!!" << endl;
@@ -57,6 +63,14 @@ int main(int argc, char** argv) {
 		}
 		catch (...) {}
 	}
+	if (program.present("--dump-file")) try {
+		std::string b_val = program.get<std::string>("--dump-file");
+		cout << "Dump file is on: " << b_val << endl;
+	} catch (...) {}
+	if (program.present("--dump-ctx")) try {
+		std::string b_val = program.get<std::string>("--dump-ctx");
+		cout << "Dump context file is on: " << b_val << endl;
+	} catch (...) {}
 
 	char lpszPath[2048];
 	cout << "Please input the path of MyCrashPadHandler: ";
@@ -67,7 +81,7 @@ int main(int argc, char** argv) {
 	cin.getline(buffer2, 16);
 	auto options = make_unique<InitializeCrashpadHandlerOptions>(); // avoid creating the structure on stack
 	options->cb = sizeof(InitializeCrashpadHandlerOptions);
-	options->DumpOptions.bEnableDump = true;
+	options->DumpOptions.EnableDump = true;
 	options->DumpOptions.DumpType = MiniDumpWithFullMemory; // Please decide this according to your app, blindly use FullMemory may seriously impact performance and disk space
 	options->DumpOptions.WithContext = true;
 	if (program.present("--restart-count")) try {
@@ -75,12 +89,18 @@ int main(int argc, char** argv) {
 		options->RestartOptions.RestartCount = stoul(b_val);
 	} catch (...) {}
 	options->RestartOptions.MaxRestartCount = 3;
-	options->RestartOptions.AddRecoveryInformationOptions.bAddRecoveryInformationInRestart = true;
+	options->RestartOptions.AddRecoveryInformationOptions.AddRecoveryInformationInRestart = true;
 	options->RestartOptions.AddRecoveryInformationOptions.AddRestartCount = true;
+	options->RestartOptions.AddRecoveryInformationOptions.AddDumpFilePath = true;
+	options->RestartOptions.AddRecoveryInformationOptions.AddDumpContextPath = true;
 	wcscpy_s(options->RestartOptions.RestartCommandLine, L"App"); // change to your real command line or if your app dont need cmdline just use placeholder like this. Do not forget to remove already-existing --restart-count! Otherwise it will duplicate
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddCustomString, L"--is-restart");
 	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddRestartCountPrefix, L"--restart-count=\"");
 	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddRestartCountSuffix, L"\"");
-	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddCustomString, L"--is-restart");
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddDumpFilePathPrefix, L"--dump-file=\"");
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddDumpFilePathSuffix, L"\"");
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddDumpContextPathPrefix, L"--dump-ctx=\"");
+	wcscpy_s(options->RestartOptions.AddRecoveryInformationOptions.AddDumpContextPathSuffix, L"\"");
 	
 	HMODULE hModule{};
 	LPVOID lpContext{};
@@ -92,12 +112,15 @@ int main(int argc, char** argv) {
 	const SIZE_T pinnedCount = 0;
 #endif
 	if (buffer2 == "y"s || buffer2 == "Y"s) {
+		cout << "Do you want to not to attach debugger? ";
+		cin.getline(buffer2, 16);
+		if (buffer2 == "y"s || buffer2 == "Y"s) options->AttachOptions.NoAttachDebugger = true;
 		cout << "Do you want to suppress dialogs? ";
 		cin.getline(buffer2, 16);
 		if (buffer2 == "y"s || buffer2 == "Y"s) options->CrashOptions.SuppressErrorDialogs = true;
-		cout << "Do you want to disallow user restart? ";
+		cout << "Do you want to disallow restart? ";
 		cin.getline(buffer2, 16);
-		if (buffer2 == "y"s || buffer2 == "Y"s) options->RestartOptions.bDisallowUserRestart = true;
+		if (buffer2 == "y"s || buffer2 == "Y"s) options->RestartOptions.DisallowRestart = true;
 		cout << "Do you want to auto restart? ";
 		cin.getline(buffer2, 16);
 		if (buffer2 == "y"s || buffer2 == "Y"s) options->RestartOptions.AutoRestart = true;
@@ -113,6 +136,7 @@ int main(int argc, char** argv) {
 		char choice[16]{};
 		cout << string(40, '=') << endl;
 		Sleep(500);
+		cout << "-1. Call main again so that you can initialize again" << endl;
 		cout << "0. Exit normally" << endl;
 		cout << "1. Uninitialize immediately" << endl;
 		cout << "2. Uninitialize and exit normally" << endl;
@@ -130,6 +154,11 @@ int main(int argc, char** argv) {
 		cin.getline(choice, 16);
 		string chosen = choice;
 		
+		if (chosen == "-1") {
+			auto r = main(argc, argv);
+			cout << "Returned from main. Code: " << r << endl;
+			continue;
+		}
 		if (chosen == "0") {
 			return 0;
 		}

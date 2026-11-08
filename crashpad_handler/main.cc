@@ -32,7 +32,7 @@ inline uint64_t MakeVersion(uint16_t major, uint16_t minor, uint16_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 3, 2);
+	return MakeVersion(1, 4, 0);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -76,17 +76,22 @@ inline static bool GetContext(LPVOID _InternalMyOpaqueContext, UINT_PTR nOffset,
 #pragma endregion
 
 
-LPVOID WINAPI crashpad_handler_Builtin(_In_opt_ HMODULE hModule, _In_ DWORD dwProcessId, _In_opt_ const InitializeCrashpadHandlerOptions* lpOptions) {
+LPVOID WINAPI crashpad_handler_Builtin(_In_opt_ HMODULE hModule, _In_ DWORD dwProcessId, _In_opt_ const PInitializeCrashpadHandlerOptions lpOptions) {
 	STARTUPINFOW si{}; PROCESS_INFORMATION pi{};
 	si.cb = sizeof(si);
 	auto lpOptions2 = make_unique<InitializeCrashpadHandlerOptions>();
 	if (lpOptions) {
+		auto cb = lpOptions->cb;
+		if (cb != sizeof(InitializeCrashpadHandlerOptions)) {
+			SetLastError(ERROR_FILE_NOT_SUPPORTED);
+			return NULL;
+		}
 		memcpy(lpOptions2.get(), lpOptions, sizeof(InitializeCrashpadHandlerOptions));
 	}
 	else {
 		memset(lpOptions2.get(), 0, sizeof(InitializeCrashpadHandlerOptions));
 	}
-	if (lpOptions2->cb && lpOptions2->cb != sizeof(InitializeCrashpadHandlerOptions)) {
+	if ((lpOptions2->cb || lpOptions) && lpOptions2->cb != sizeof(InitializeCrashpadHandlerOptions)) {
 		SetLastError(ERROR_FILE_NOT_SUPPORTED);
 		return NULL;
 	}
@@ -177,6 +182,7 @@ LPVOID WINAPI crashpad_handler_Builtin(_In_opt_ HMODULE hModule, _In_ DWORD dwPr
 	SetContextValue(MyContext, 24, hEventShouldStopResponse);
 	SetContextValue(MyContext, 32, pi.dwProcessId);
 	SetContextValue(MyContext, 40, pi.hProcess);
+	SetContextValue(MyContext, 48, (DWORD)((options.AttachOptions.NoAttachDebugger) ? 1 : 0));
 
 	return lpOpaqueContext;
 }
@@ -192,6 +198,7 @@ BOOL WINAPI crashpad_handler_Builtin_Free(LPVOID lpContext) {
 	HANDLE hEvent = 0, hEventResp = 0;
 	DWORD dwProcessId = 0;
 	HANDLE hProcess = 0;
+	DWORD IsWatchdogMode = 0;
 
 	if (!GetContext(lpContext, 0, &number, sizeof(number))) return false;
 	if (!GetContext(lpContext, 8, &version, sizeof(version))) return false;
@@ -199,6 +206,7 @@ BOOL WINAPI crashpad_handler_Builtin_Free(LPVOID lpContext) {
 	if (!GetContext(lpContext, 24, &hEventResp, sizeof(hEventResp))) return false;
 	if (!GetContext(lpContext, 32, &dwProcessId, sizeof(dwProcessId))) return false;
 	if (!GetContext(lpContext, 40, &hProcess, sizeof(hProcess))) return false;
+	if (!GetContext(lpContext, 48, &IsWatchdogMode, sizeof(IsWatchdogMode))) return false;
 
 	if (number != OpaqueContextNumber) {
 		SetLastError(ERROR_INVALID_DATA);
@@ -217,10 +225,16 @@ BOOL WINAPI crashpad_handler_Builtin_Free(LPVOID lpContext) {
 	bool ok = true;
 	ok = SetEvent(hEvent) && ok; // NO directly kill process otherwise main app will also be killed
 	ok = CloseHandle(hEvent) && ok;
-	ok = (WaitForSingleObject(hEventResp, 10000) == WAIT_OBJECT_0) && ok;
+	if (IsWatchdogMode) {
+		TerminateProcess(hProcess, 0);
+		ok = (WaitForSingleObject(hProcess, 5000) == WAIT_OBJECT_0) && ok;
+	}
+	else {
+		ok = (WaitForSingleObject(hEventResp, 10000) == WAIT_OBJECT_0) && ok;
+		if (IsDebuggerPresent()) DebugBreak();
+		//ok = (WaitForSingleObject(hProcess, 10000) == WAIT_OBJECT_0) && ok; // change: let the child itself go, no wait anymore
+	}
 	ok = CloseHandle(hEventResp) && ok;
-	if (IsDebuggerPresent()) DebugBreak();
-	//ok = (WaitForSingleObject(hProcess, 10000) == WAIT_OBJECT_0) && ok; // change: let the child itself go, no wait anymore
 	ok = CloseHandle(hProcess) && ok;
 	ok = VirtualFree(lpContext, 0, MEM_RELEASE) && ok;
 	return ok;
@@ -332,14 +346,16 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 
 	EnableDebugPrivilege();
 	DebugSetProcessKillOnExit(FALSE);
-	if (!DebugActiveProcess(pid)) {
+	const bool NoAttach = options.AttachOptions.NoAttachDebugger;
+	if (!NoAttach) if (!DebugActiveProcess(pid)) {
 		DWORD err = GetLastError();
 		CloseHandle(hProcess);
 		LocalFree(argv);
 		ExitProcess(err);
 	}
 	volatile bool shouldStop = false;
-	std::thread waiter([hProcess, pid, hExitEvent, &hExitEventPeer, &shouldStop] {
+	std::thread waiter([NoAttach, hProcess, pid, hExitEvent, &hExitEventPeer, &shouldStop] {
+		if (NoAttach) return;
 		HANDLE handles[]{ hExitEvent, hProcess };
 		auto res = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
 		if (res == WAIT_OBJECT_0) {
@@ -357,7 +373,9 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 	SetEvent(hEvent); CloseHandle(hEvent);
 
 	DEBUG_EVENT ev{};
-	auto res = EnterDebugLoop(&ev, [&](const LPDEBUG_EVENT ev, LPDWORD lpdwContinueStatus) -> bool {
+	wstring DumpFilePath, DumpCtxFilePath;
+	EnterDebugLoopReturnValue res{};
+	if (!NoAttach) res = EnterDebugLoop(&ev, [&](const LPDEBUG_EVENT ev, LPDWORD lpdwContinueStatus) -> bool {
 		switch (ev->u.Exception.ExceptionRecord.ExceptionCode) {
 		case EXCEPTION_ACCESS_VIOLATION:
 			// First chance: Pass this on to the system. 
@@ -394,7 +412,7 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 		}
 		if (!(ev->u.Exception.dwFirstChance)) {
 			// last chance
-			if (options.DumpOptions.bEnableDump) do {
+			if (options.DumpOptions.EnableDump) do {
 				// Create a dump.
 				wstring dump_dir = options.DumpOptions.DumpDirectory[0] ? options.DumpOptions.DumpDirectory : exe_path;
 				wstring custom = options.DumpOptions.CustomizedDumpNameFormat;
@@ -423,8 +441,8 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 				ep.ContextRecord = &ctx;
 
 				// Dump file.
-				wstring finalDumpFile = filesystem::path(dump_dir) / custom;
-				HANDLE hFile = CreateFileW(finalDumpFile.c_str(), GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+				DumpFilePath = filesystem::path(dump_dir) / custom;
+				HANDLE hFile = CreateFileW(DumpFilePath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 				if (hFile && hFile != INVALID_HANDLE_VALUE) {
 					MINIDUMP_EXCEPTION_INFORMATION info{};
 					info.ThreadId = ev->dwThreadId;
@@ -437,8 +455,8 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 				
 				if (!options.DumpOptions.WithContext) break;
 
-				wstring finalDumpFile2 = filesystem::path(dump_dir) / custom_ctx;
-				hFile = CreateFileW(finalDumpFile2.c_str(), GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+				DumpCtxFilePath = filesystem::path(dump_dir) / custom_ctx;
+				hFile = CreateFileW(DumpCtxFilePath.c_str(), GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
 				if (hFile && hFile != INVALID_HANDLE_VALUE) {
 					DWORD tmp{};
 					string Char1 = "Application has crashed!!\nProcess Identifier: " + to_string(pid) + "\nException record: [Length=" +
@@ -460,7 +478,7 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 		code = res.diedValue;
 	}
 	else {
-		DebugActiveProcessStop(pid);
+		if (!NoAttach) DebugActiveProcessStop(pid);
 		if (shouldStop) ExitProcess(0);
 		WaitForSingleObject(hProcess, INFINITE);
 		GetExitCodeProcess(hProcess, &code);
@@ -473,7 +491,7 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 			L"\n\n" + ErrorChecker(code).raw_message();
 		int user;
 		bool AutoRestart = options.RestartOptions.AutoRestart;
-		bool NoUserRestart = options.RestartOptions.bDisallowUserRestart;
+		bool NoUserRestart = options.RestartOptions.DisallowRestart;
 		auto RestartCount = options.RestartOptions.RestartCount;
 		if ((++RestartCount) == 0) {
 			// overflow happened!!!
@@ -504,17 +522,23 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 				MB_ICONERROR | (NoUserRestart ? MB_OK : MB_YESNO) | MB_SERVICE_NOTIFICATION);
 		} while (0);
 		// append restart command line according to configurations
-		if (options.RestartOptions.AddRecoveryInformationOptions.bAddRecoveryInformationInRestart) {
+		if (options.RestartOptions.AddRecoveryInformationOptions.AddRecoveryInformationInRestart) {
 			if (options.RestartOptions.AddRecoveryInformationOptions.AddCustomString[0]) {
 				cmd += (L" ");
 				cmd += (options.RestartOptions.AddRecoveryInformationOptions.AddCustomString);
 			}
-			if (options.RestartOptions.AddRecoveryInformationOptions.AddRestartCount) {
-				cmd += (format(L" {}{}{}",
-					options.RestartOptions.AddRecoveryInformationOptions.AddRestartCountPrefix,
-					RestartCount,
-					options.RestartOptions.AddRecoveryInformationOptions.AddRestartCountSuffix));
-			}
+			if (options.RestartOptions.AddRecoveryInformationOptions.AddRestartCount) cmd += (format(L" {}{}{}",
+				options.RestartOptions.AddRecoveryInformationOptions.AddRestartCountPrefix,
+				RestartCount,
+				options.RestartOptions.AddRecoveryInformationOptions.AddRestartCountSuffix));
+			if (options.RestartOptions.AddRecoveryInformationOptions.AddDumpFilePath) cmd += (format(L" {}{}{}",
+				options.RestartOptions.AddRecoveryInformationOptions.AddDumpFilePathPrefix,
+				DumpFilePath,
+				options.RestartOptions.AddRecoveryInformationOptions.AddDumpFilePathSuffix));
+			if (options.RestartOptions.AddRecoveryInformationOptions.AddDumpContextPath) cmd += (format(L" {}{}{}",
+				options.RestartOptions.AddRecoveryInformationOptions.AddDumpContextPathPrefix,
+				DumpCtxFilePath,
+				options.RestartOptions.AddRecoveryInformationOptions.AddDumpContextPathSuffix));
 		}
 		if (user == IDYES) {
 			STARTUPINFO si{}; PROCESS_INFORMATION pi{};
