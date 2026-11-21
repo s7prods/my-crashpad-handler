@@ -33,7 +33,7 @@ inline uint64_t MakeVersion(uint16_t major, uint16_t minor, uint16_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 4, 1);
+	return MakeVersion(1, 4, 2);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -354,8 +354,8 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 		LocalFree(argv);
 		ExitProcess(err);
 	}
-	volatile bool shouldStop = false;
-	std::thread waiter([NoAttach, hProcess, pid, hExitEvent, &hExitEventPeer, &shouldStop] {
+	std::atomic<bool> shouldStop = false;
+	std::thread waiter([NoAttach, hProcess, hExitEvent, &hExitEventPeer, &shouldStop] {
 		if (NoAttach) return;
 		HANDLE handles[]{ hExitEvent, hProcess };
 		auto res = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
@@ -367,6 +367,17 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 			CloseHandle(hExitEventPeer);
 			hExitEventPeer = NULL;
 			return;
+		}
+		else return;
+	});
+	std::atomic<bool> shouldNotWatchAnymore = false;
+	std::thread waiter2([NoAttach, hProcess, &shouldNotWatchAnymore] {
+		if (NoAttach) return;
+		auto res = WaitForSingleObject(hProcess, INFINITE);
+		if (res == WAIT_OBJECT_0) {
+			SleepEx(5000, TRUE);
+			if (shouldNotWatchAnymore) return;
+			ExitProcess(ERROR_TIMEOUT);
 		}
 		else return;
 	});
@@ -474,6 +485,7 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 		*lpdwContinueStatus = DBG_EXCEPTION_NOT_HANDLED;
 		return false;
 	});
+	shouldNotWatchAnymore = true;
 
 	if (res.processDied) {
 		code = res.diedValue;
@@ -563,6 +575,8 @@ clean:
 	if (hExitEvent) CloseHandle(hExitEvent);
 	CloseHandle(hProcess);
 	LocalFree(argv);
+	ExitProcess(code);
+	if (waiter2.joinable()) waiter2.join();
 }
 
 

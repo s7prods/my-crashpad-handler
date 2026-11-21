@@ -112,6 +112,8 @@ static EnterDebugLoopReturnValue EnterDebugLoop(const LPDEBUG_EVENT DebugEv, std
 
 		case EXIT_PROCESS_DEBUG_EVENT:
 			// Display the process's exit code. 
+			// Important: This event might not be triggered, such as process being killed (not normal exit)
+			// so we must not depend on all this
 
 			//dwContinueStatus = OnExitProcessDebugEvent(DebugEv);
 			next = false;

@@ -1,5 +1,5 @@
 ﻿#pragma once
-// Version: 1.4.1
+// Version: 1.4.2
 #include <Windows.h>
 #include <bcrypt.h>
 #include <DbgHelp.h>
@@ -218,7 +218,7 @@ extern "C" {
 #endif
 
 
-#define Internal_InitializeCrashpadHandler_Version 1000004000001ull
+#define Internal_InitializeCrashpadHandler_Version 1000004000002ull
 
 
 

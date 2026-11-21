@@ -6,8 +6,8 @@
 using namespace std;
 
 const wchar_t* GlobalReleasePinnedList[] = {
-	L"b9b8b081f6b967fe57810c5207089473542944cca6c739409705d906106be6f7",
-	L"4fa8ea339b5ea743f932a1dafbe99979fdc6901cba68ce4009569f08b4074d44",
+	L"debc0903005bd70734d53aa98d07614abf24b5c4a19b39196f63d6967797e88b",
+	L"1cbae1bf44c9226fc9dd109c6b5c5adc4a42927aafc93b3f9f6dd2c983aec8cd",
 };
 
 inline static wstring s2ws(const string& str) {
