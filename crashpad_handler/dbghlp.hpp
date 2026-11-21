@@ -29,6 +29,22 @@ static BOOL EnableDebugPrivilege() {
 	return TRUE;
 }
 
+static BOOL WaitForDebugEvent2(
+	_Out_ LPDEBUG_EVENT lpDebugEvent,
+	_In_ DWORD dwMilliseconds
+) {
+	using t = BOOL(APIENTRY*)(LPDEBUG_EVENT, DWORD);
+	static HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+	if (!k32) __fastfail(2);
+	static t fp = nullptr;
+	if (!fp) {
+		fp = (t)GetProcAddress(k32, "WaitForDebugEventEx");
+		if (!fp) fp = (t)GetProcAddress(k32, "WaitForDebugEvent");
+		if (!fp) __fastfail(2);
+	}
+	return fp(lpDebugEvent, dwMilliseconds);
+}
+
 struct EnterDebugLoopReturnValue {
 	bool processDied;
 	DWORD diedValue;
@@ -38,6 +54,7 @@ struct EnterDebugLoopReturnValue {
 static EnterDebugLoopReturnValue EnterDebugLoop(const LPDEBUG_EVENT DebugEv, std::function<bool(const LPDEBUG_EVENT, LPDWORD lpdwContinueStatus)> OnException) {
 	bool next = true;
 	EnterDebugLoopReturnValue ret{};
+	auto strBuffer = std::make_unique<uint8_t[]>(65538);
 	while (next)
 	{
 		DWORD dwContinueStatus = DBG_CONTINUE; // exception continuation 
@@ -45,7 +62,7 @@ static EnterDebugLoopReturnValue EnterDebugLoop(const LPDEBUG_EVENT DebugEv, std
 		// Wait for a debugging event to occur. The second parameter indicates
 		// that the function does not return until a debugging event occurs. 
 
-		WaitForDebugEvent(DebugEv, INFINITE);
+		if (!WaitForDebugEvent2(DebugEv, INFINITE)) break;
 
 		// Process the debugging event code. 
 
@@ -123,6 +140,18 @@ static EnterDebugLoopReturnValue EnterDebugLoop(const LPDEBUG_EVENT DebugEv, std
 			// Display the output debugging string. 
 
 			//dwContinueStatus = OnOutputDebugStringEvent(DebugEv);
+			if (DebugEv->u.DebugString.nDebugStringLength) {
+				ZeroMemory(strBuffer.get(), 65538);
+				HANDLE hProcess = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, DebugEv->dwProcessId);
+				if (hProcess) {
+					SIZE_T read = 0;
+					if (ReadProcessMemory(hProcess, DebugEv->u.DebugString.lpDebugStringData, strBuffer.get(), DebugEv->u.DebugString.nDebugStringLength, &read)) {
+						if (DebugEv->u.DebugString.fUnicode) OutputDebugStringW((LPCWSTR)strBuffer.get());
+						else OutputDebugStringA((LPCSTR)strBuffer.get());
+					}
+					CloseHandle(hProcess);
+				}
+			}
 			break;
 
 		case RIP_EVENT:

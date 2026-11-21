@@ -20,6 +20,7 @@
 #include <tlhelp32.h>
 #include <string>
 #include <algorithm>
+#include <memory>
 #include <thread>
 #include <functional>
 #include <stdlib.h>

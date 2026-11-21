@@ -1,5 +1,5 @@
 ﻿#pragma once
-// Version: 1.4.0
+// Version: 1.4.1
 #include <Windows.h>
 #include <bcrypt.h>
 #include <DbgHelp.h>
@@ -218,7 +218,7 @@ extern "C" {
 #endif
 
 
-#define Internal_InitializeCrashpadHandler_Version 1000004000000ull
+#define Internal_InitializeCrashpadHandler_Version 1000004000001ull
 
 
 
@@ -277,6 +277,9 @@ typedef struct InitializeCrashpadHandlerOptions_t {
 } InitializeCrashpadHandlerOptions, * PInitializeCrashpadHandlerOptions;
 #pragma pack(pop)
 
+#pragma warning(push)
+#pragma warning(disable: 4505)
+
 /// <summary>
 /// Initialize the crashpad handler
 /// </summary>
@@ -330,7 +333,6 @@ _Success_(return == ERROR_SUCCESS) static DWORD InitializeCrashpadHandler(
 		NTSTATUS st = 0;
 		WCHAR actualHash[65] = { 0 };
 		static const WCHAR kHex[] = L"0123456789abcdef";
-		SIZE_T i = 0;
 
 		lpBuffer = (BYTE*)VirtualAlloc(0, cbBuffer, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 		if (!lpBuffer) { CloseHandle(hInput); return ERROR_NOT_ENOUGH_MEMORY; }
@@ -497,6 +499,8 @@ _Success_(return == ERROR_SUCCESS) static DWORD UninitializeCrashpadHandler(_In_
 	}
 	return ERROR_SUCCESS;
 }
+
+#pragma warning(pop)
 
 
 

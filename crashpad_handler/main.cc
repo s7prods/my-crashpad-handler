@@ -8,14 +8,15 @@
 
 HMODULE hModule;
 
-BOOL APIENTRY DllMain(HMODULE hModule,
+BOOL APIENTRY DllMain(HMODULE hModule2,
 	DWORD  ul_reason_for_call,
 	LPVOID lpReserved
 ) {
+	UNREFERENCED_PARAMETER(lpReserved);
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
-		::hModule = hModule;
+		::hModule = hModule2;
 		break;
 	default:;
 	}
@@ -32,7 +33,7 @@ inline uint64_t MakeVersion(uint16_t major, uint16_t minor, uint16_t patch) {
 }
 
 uint64_t __stdcall Version() {
-	return MakeVersion(1, 4, 0);
+	return MakeVersion(1, 4, 1);
 }
 
 constexpr uint64_t OpaqueContextNumber = 0x5a0408a8bfa9414eull;
@@ -76,7 +77,7 @@ inline static bool GetContext(LPVOID _InternalMyOpaqueContext, UINT_PTR nOffset,
 #pragma endregion
 
 
-LPVOID WINAPI crashpad_handler_Builtin(_In_opt_ HMODULE hModule, _In_ DWORD dwProcessId, _In_opt_ const PInitializeCrashpadHandlerOptions lpOptions) {
+LPVOID WINAPI crashpad_handler_Builtin(_In_opt_ HMODULE hAppModule, _In_ DWORD dwProcessId, _In_opt_ const PInitializeCrashpadHandlerOptions lpOptions) {
 	STARTUPINFOW si{}; PROCESS_INFORMATION pi{};
 	si.cb = sizeof(si);
 	auto lpOptions2 = make_unique<InitializeCrashpadHandlerOptions>();
@@ -103,7 +104,7 @@ LPVOID WINAPI crashpad_handler_Builtin(_In_opt_ HMODULE hModule, _In_ DWORD dwPr
 	auto dll_path = make_unique<WCHAR[]>(32768);
 	GetModuleFileNameW(::hModule, dll_path.get(), 32768);
 	auto exe_path = make_unique<WCHAR[]>(32768);
-	GetModuleFileNameW(hModule, exe_path.get(), 32768);
+	GetModuleFileNameW(hAppModule, exe_path.get(), 32768);
 	SECURITY_ATTRIBUTES CanInherit{
 		.nLength = sizeof(SECURITY_ATTRIBUTES),
 		.bInheritHandle = TRUE,
@@ -287,7 +288,7 @@ VOID WINAPI crashpad_handler_RunDLL(HWND, HINSTANCE, PSTR, int) {
 	HANDLE hEvent = (HANDLE)(PVOID)sig_n;
 	HANDLE hExitEvent = (HANDLE)(PVOID)ext_n;
 	HANDLE hExitEventPeer = (HANDLE)(PVOID)per_n;
-	DWORD code = -1;
+	DWORD code = (DWORD)-1;
 
 	{
 		DWORD sizeChars = 32768;

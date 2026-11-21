@@ -6,8 +6,8 @@
 using namespace std;
 
 const wchar_t* GlobalReleasePinnedList[] = {
-	L"cf4981108cd1665801a0e2c2de889d2e88974a49119b3e9551bed855d21ee42b",
-	L"a36e314a63bbce35d9a4aa64e4df6590d1894e21c8e3c78afb19cf56c244ac3b",
+	L"b9b8b081f6b967fe57810c5207089473542944cca6c739409705d906106be6f7",
+	L"4fa8ea339b5ea743f932a1dafbe99979fdc6901cba68ce4009569f08b4074d44",
 };
 
 inline static wstring s2ws(const string& str) {
@@ -153,6 +153,7 @@ int main(int argc, char** argv) {
 		cout.flush();
 		cin.getline(choice, 16);
 		string chosen = choice;
+		OutputDebugStringW(std::format(L"{} user chosen: {}", time(0), s2ws(chosen)).c_str());
 		
 		if (chosen == "-1") {
 			auto r = main(argc, argv);
